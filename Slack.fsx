@@ -11,7 +11,6 @@ module Async =
 
 module Parsing = 
     open System.Text.RegularExpressions
-
     let (|Regex|_|) pattern source = 
         let m = Regex.Match(source, pattern, RegexOptions.CultureInvariant ||| RegexOptions.IgnoreCase)
         if m.Success then [ for x in m.Groups -> x.Value ] |> List.tail |> Some
@@ -36,25 +35,20 @@ open System.Net.WebSockets
 
 type [<Struct>] SlackUserId = SlackUserId of string
 type RtmStart = JsonProvider< "rtmStart.sample.json" >
-
 type RtmMessage = JsonProvider< "rtmMessage.sample.json", SampleIsList=true >
 let Token = System.IO.File.ReadAllText("token")
-
-let rtmStart = Http.RequestString("https://slack.com/api/rtm.start", query=["token", Token], httpMethod="GET") |> RtmStart.Parse
-let tryFindChannel (Channel channel) = rtmStart.Channels |> Array.tryFind(fun c -> c.Name = channel)
-
-let tryFindUserName (SlackUserId userId) = rtmStart.Users |> Array.tryFind(fun u -> u.Id = userId) |> Option.map(fun u -> TeamMember u.Name)
-
+let rtmStart () = Http.RequestString("https://slack.com/api/rtm.start", query=["token", Token], httpMethod="GET") |> RtmStart.Parse
+let RtmStart = rtmStart ()
+let tryFindChannel (Channel channel) = RtmStart.Channels |> Array.tryFind(fun c -> c.Name = channel)
+let tryFindUserName (SlackUserId userId) = RtmStart.Users |> Array.tryFind(fun u -> u.Id = userId) |> Option.map(fun u -> TeamMember u.Name)
 let findBotId (Bot bot) = 
-    let user = rtmStart.Users |> Array.tryFind(fun u -> u.Name = bot)
+    let user = RtmStart.Users |> Array.tryFind(fun u -> u.Name = bot)
     user |> Option.map (fun x -> x.Id |> SlackUserId)
-
 let tryFindUserId (Email email) = 
-    rtmStart.Users
+    RtmStart.Users
     |> Array.filter(fun u -> u.Profile.Email = Some email)
     |> Array.tryHead
     |> Option.map(fun u -> SlackUserId u.Id)
-
 let rec receive (ms: MemoryStream) token (webSocket: ClientWebSocket) = 
     async {
         let buffer = new ArraySegment<byte>(Array.zeroCreate(8192))
@@ -67,9 +61,7 @@ let rec receive (ms: MemoryStream) token (webSocket: ClientWebSocket) =
         else
             return! webSocket |> receive ms token
     }
-
 type [<Struct>] Message = Message of Channel * TeamMember * TextMessage
-
 let readMessage token (webSocket: ClientWebSocket) (SlackUserId botId) =
     async {
         printfn "readMessage for botId:%s" botId
@@ -105,7 +97,7 @@ let ping token n webSocket =
         do! sprintf """{"id": %d, "type":"ping"}""" n |> sendData token webSocket
         printfn "ping sent"
     }
-let socket token userId handler = 
+let webSocketServer token userId handler = 
     let handle = function Message (c, tm, m) -> handler c tm m
 
     let rec read token (webSocket:ClientWebSocket) = 
@@ -120,7 +112,7 @@ let socket token userId handler =
     async { 
         use webSocket = new ClientWebSocket()
         printfn "socket connecting"
-        let rtmStart = Http.RequestString("https://slack.com/api/rtm.start", query=["token", Token], httpMethod="GET") |> RtmStart.Parse
+        let rtmStart = rtmStart ()
 
         let rec pinG token n (webSocket:ClientWebSocket) =
             async {
@@ -143,7 +135,7 @@ let socket token userId handler =
 
         return webSocket.State
     }
-let rec server (token:CancellationToken) userId handler = 
+let rec faultTolerantServer (token:CancellationToken) userId handler = 
     let next = 
         let rnd = Random ()
         fun () -> rnd.Next(0, 10)
@@ -152,19 +144,19 @@ let rec server (token:CancellationToken) userId handler =
         if not token.IsCancellationRequested then 
             let time = next ()
             printfn "retrying in %is" time
-            time * 1000 |> Async.Sleep |> Async.bind (fun _ -> server token userId handler)
+            time * 1000 |> Async.Sleep |> Async.bind (fun _ -> faultTolerantServer token userId handler)
         else 
             printfn "socketServer finished"
             Async.ret ()
 
     async {
         do! 
-            socket token userId handler
+            webSocketServer token userId handler
             |> Async.Catch
             |> Async.bind (function 
                 | Choice1Of2 WebSocketState.Open -> printfn "server finished" |> Async.ret
                 | Choice1Of2 state -> 
-                    printfn "server finished not gracefully with state %s" (state.ToString())
+                    state.ToString() |> printfn "server finished not gracefully with state %s"
                     reconnect ()
                 | Choice2Of2 ex ->
                     printfn "reconnecting due to %O" ex
@@ -181,7 +173,7 @@ let post handler =
                 }
             listen ()
     actor.Post
-let slackBot token userId = server token userId (fun c t m -> post (printfn "slackBot received %A") (c,t,m) |> Async.ret)
+let slackBot token userId = faultTolerantServer token userId (fun c t m -> post (printfn "slackBot received %A") (c,t,m) |> Async.ret)
 let cancel = new CancellationTokenSource()
 
 findBotId (Bot "belzebot") |> Option.iter (slackBot cancel.Token >> Async.RunSynchronously)

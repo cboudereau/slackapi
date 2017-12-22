@@ -38,7 +38,7 @@ type [<Struct>] SlackUserId = SlackUserId of string
 type RtmStart = JsonProvider< "rtmStart.sample.json" >
 
 type RtmMessage = JsonProvider< "rtmMessage.sample.json", SampleIsList=true >
-let [<Literal>] Token = "xoxb-62388246470-2S9tkBTE1YU9NgDIGK5XMjwU"
+let Token = System.IO.File.ReadAllText("token")
 
 let rtmStart = Http.RequestString("https://slack.com/api/rtm.start", query=["token", Token], httpMethod="GET") |> RtmStart.Parse
 let tryFindChannel (Channel channel) = rtmStart.Channels |> Array.tryFind(fun c -> c.Name = channel)
@@ -68,7 +68,7 @@ let rec receive (ms: MemoryStream) token (webSocket: ClientWebSocket) =
             return! webSocket |> receive ms token
     }
 
-type Message = Message of Channel * TeamMember * TextMessage
+type [<Struct>] Message = Message of Channel * TeamMember * TextMessage
 
 let readMessage token (webSocket: ClientWebSocket) (SlackUserId botId) =
     async {

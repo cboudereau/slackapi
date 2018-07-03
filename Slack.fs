@@ -1,4 +1,4 @@
-#r "packages/FSharp.Data/lib/net45/FSharp.Data.dll"
+module Slack
 open System
 open System.IO
 open System.Threading

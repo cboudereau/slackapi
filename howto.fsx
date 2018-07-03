@@ -1,9 +1,11 @@
+#r "packages/FSharp.Data/lib/net45/FSharp.Data.dll"
+
 //Register your token before loading module : for example bind the env var to a ignored file content
 let (</>) x y = System.IO.Path.Combine(x, y)
 System.Environment.SetEnvironmentVariable("SlackToken", System.IO.File.ReadAllText(__SOURCE_DIRECTORY__ </> "token"))
 
 //Then load the Slack module
-#load "Slack.fsx"
+#load "Slack.fs"
 
 //Disable logging
 None |> Slack.Log.setLogLevel

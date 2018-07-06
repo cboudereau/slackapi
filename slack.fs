@@ -1,56 +1,15 @@
 module Slack
+//#r "packages/FSharp.Data/lib/net45/FSharp.Data.dll"
+//#load "paket-files/cboudereau/fsharplib/core.fs"
+//#load "paket-files/cboudereau/fsharplib/log.fs"
+//#load "paket-files/cboudereau/fsharplib/parsing.fs"
+//#load "paket-files/cboudereau/fsharplib/string.fs"
+
 open System
 open System.IO
 open System.Threading
 
-module Log = 
-    type [<Struct>] LogLevel = TRACE | DEBUG | INFO | WARN | ERROR
-    let private value = function
-        | ERROR -> 1
-        | WARN  -> 2
-        | INFO  -> 3
-        | DEBUG -> 4
-        | TRACE -> 5
-    let private pretty = function
-        | ERROR -> "[ERR]"
-        | WARN  -> "[WRN]"
-        | INFO  -> "[INF]"
-        | DEBUG -> "[DBG]"
-        | TRACE -> "[TRC]"
-
-    let mutable private logLevel = None
-    let setLogLevel lvl = logLevel <- lvl
-
-    let mutable Logger = 
-        fun lvl (x:string) -> 
-            sprintf "%s : %s"(pretty lvl) x |> Console.WriteLine
-
-    let internal log lvl = 
-        fun fmt -> 
-            let logger = 
-                let logLvl = logLevel |> Option.map value |> Option.defaultValue 0
-                let v = value lvl
-                if v > logLvl  then ignore else Logger lvl
-            Printf.ksprintf logger fmt
-
-module Async = 
-    let map f x = async { let! x' = x in return f x' }
-    let bind f x =  async.Bind(x, f)
-    let ret x = async.Return(x)
-    let ofOption zero = function Some x -> x | None -> ret zero
-
-module Parsing = 
-    open System.Text.RegularExpressions
-    let (|Regex|_|) pattern source = 
-        let m = Regex.Match(source, pattern, RegexOptions.CultureInvariant ||| RegexOptions.IgnoreCase)
-        if m.Success then [ for x in m.Groups -> x.Value ] |> List.tail |> Some
-        else None
-
-module String = 
-    let icontains search source = (source:string).IndexOf((search:string), StringComparison.InvariantCultureIgnoreCase) <> -1
-    let (|Contains|_|) search source =
-        if icontains search source then Some source
-        else None 
+open Core
 
 type [<Struct>] TeamMember = TeamMember of string
 type [<Struct>] Email = Email of string
@@ -464,16 +423,18 @@ let private rtmStart () = Http.RequestString("https://slack.com/api/rtm.start", 
 let private RtmStart = rtmStart ()
 
 let post (Channel channel) (TextMessage text) = 
-    Http.Request(
-        "https://slack.com/api/chat.postMessage", 
-        httpMethod = HttpMethod.Post,
-        body = FormValues(
-            [ ("token", Token)
-              ("channel", channel)
-              ("text", text)
-              ("as_user", "true")
-              ("link_names", "1") ]))
-    |> ignore
+    if System.String.IsNullOrEmpty text then ()
+    else
+        Http.Request(
+            "https://slack.com/api/chat.postMessage", 
+            httpMethod = HttpMethod.Post,
+            body = FormValues(
+                [ ("token", Token)
+                  ("channel", channel)
+                  ("text", text)
+                  ("as_user", "true")
+                  ("link_names", "1") ]))
+        |> ignore
 
 let tryFindChannel (Channel channel) = RtmStart.Channels |> Array.tryFind(fun c -> c.Name = channel)
 
@@ -612,15 +573,54 @@ let rec faultTolerantServer (cancelToken:CancellationToken) userId handler =
                     Log.log Log.ERROR "reconnecting due to %O" ex
                     reconnect ())
     }
+
+module StructTuple = 
+    let sfst (struct(x,_)) = x
+    let ssnd (struct(_,x)) = x
+    let create x y = struct(x,y)
+
+type [<Struct>] NonEmptyList<'a> = private NonEmptyList of 'a list
+
+module NonEmptyList = 
+    let build l = if l |> List.isEmpty then None else NonEmptyList l |> Some
+    let singleton x = NonEmptyList [x]
+    let map f (NonEmptyList l) = l |> List.map f |> NonEmptyList
+    let append (NonEmptyList x) (NonEmptyList y) = List.append x y |> NonEmptyList
+    let combine x y = Option.map2 append x y |> Option.orElse x |> Option.orElse y
+    let value (NonEmptyList l) = l
+
+type [<Struct>] State<'a> = State of 'a
+
+type [<Struct>] Notification<'a> = 
+    { Channel: Channel
+      From: TeamMember
+      Message: 'a }
+
+module Notification = 
+    let build channel teamMember message = { Channel = channel; From = teamMember; Message = message }
+
+type [<Struct>] HandlerResponse<'a> =
+    { Messages : NonEmptyList<Notification<TextMessage>> option
+      State: State<'a> } 
+
+module HandlerResponse = 
+    let build m s = { Messages = m; State=s }
+
 module Actor = 
     let spawn handler state = 
+        let post channel (TeamMember teamMember) (TextMessage m) =
+            sprintf "@%s : %s" teamMember m |> TextMessage |> post channel
         let actor = 
             MailboxProcessor.Start <| fun channel -> 
                 let rec listen ctx = 
                     async {
-                        let! msg = channel.Receive ()
-                        let! ctx = handler msg ctx
-                        do! listen ctx
+                        let! (notification:Notification<'a> option) = channel.TryReceive (10000)
+                        let! result = handler ctx notification
+                        
+                        result.Messages
+                        |> Option.iter (NonEmptyList.value >> List.iter (fun n -> post n.Channel n.From n.Message ) )
+
+                        do! result.State |> listen
                     }
                 listen state
         actor.Post

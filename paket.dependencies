@@ -1,2 +1,7 @@
 source https://www.nuget.org/api/v2
 nuget fsharp.data
+
+github cboudereau/fsharplib core.fs
+github cboudereau/fsharplib log.fs
+github cboudereau/fsharplib parsing.fs
+github cboudereau/fsharplib string.fs

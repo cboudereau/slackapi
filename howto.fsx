@@ -11,7 +11,7 @@ let (</>) x y = System.IO.Path.Combine(x, y)
 System.Environment.SetEnvironmentVariable("SlackToken", System.IO.File.ReadAllText(__SOURCE_DIRECTORY__ </> "token"))
 
 //Then load the Slack module
-#load "slack.fsx"
+#load "slack.fs"
 
 //Disable logging
 None |> Log.setLogLevel

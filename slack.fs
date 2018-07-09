@@ -16,6 +16,16 @@ type [<Struct>] Email = Email of string
 type [<Struct>] TextMessage = TextMessage of string
 type [<Struct>] Channel = Channel of string
 type [<Struct>] Bot = Bot of string
+type [<Struct>] SlackUserId = SlackUserId of string
+
+module SlackUserId = 
+    let encode (SlackUserId userId) = sprintf "<@%s>" userId
+
+module TextMessage = 
+    let clean userId (TextMessage m) = 
+        if System.String.IsNullOrEmpty m then TextMessage m
+        else
+            m.Replace(SlackUserId.encode userId, "").TrimStart([|' ';':'|]) |> TextMessage
 
 type SlackBotException (m,i) = inherit exn ((m:string),(i:exn))
 
@@ -411,7 +421,6 @@ let [<Literal>] private rtmMessageJson = """
   }
 ]"""
 
-type [<Struct>] SlackUserId = SlackUserId of string
 type private RtmStart = JsonProvider< rtmStartJson >
 type private RtmMessage = JsonProvider< rtmMessageJson, SampleIsList=true >
 
@@ -450,7 +459,7 @@ let tryFindUserId (Email email) =
     |> Array.tryHead
     |> Option.map(fun u -> SlackUserId u.Id)
 
-let hasUser (SlackUserId botId) (TextMessage m) = String.icontains (sprintf "<@%s>" botId) m
+let hasUser botId (TextMessage m) = String.icontains (SlackUserId.encode botId) m
 
 let rec private receive (ms: MemoryStream) token (webSocket: ClientWebSocket) = 
     async {
@@ -467,8 +476,9 @@ let rec private receive (ms: MemoryStream) token (webSocket: ClientWebSocket) =
 
 type [<Struct>] Message = Message of Channel * TeamMember * TextMessage
 
-let private readMessage token (webSocket: ClientWebSocket) (SlackUserId botId) =
+let private readMessage token (webSocket: ClientWebSocket) slackBotId =
     async {
+        let (SlackUserId botId) = slackBotId
         Log.log Log.TRACE "readMessage for botId:%s" botId
         use ms = new MemoryStream ()
         return! 
@@ -476,17 +486,17 @@ let private readMessage token (webSocket: ClientWebSocket) (SlackUserId botId) =
             |> Async.Catch
             |> Async.map (function
                 | Choice1Of2 data -> 
-                    let message = System.Text.ASCIIEncoding.ASCII.GetString(data) |> RtmMessage.Parse
+                    let message = System.Text.UTF8Encoding.UTF8.GetString(data) |> RtmMessage.Parse
                     match message.Type, message.ReplyTo, message.Text, message.User, message.Channel with
                     | String.Contains "pong" _, Some id, _, _, _ -> 
                         Log.log Log.DEBUG "pong %i" id
                         None
-                    | String.Contains "message" _, _, Some (String.Contains botId text), Some user, Some channel when user <> botId ->
+                    | String.Contains "message" _, _, Some (String.Contains (SlackUserId.encode slackBotId) text), Some user, Some channel when user <> botId ->
                         let userName = 
                             match user |> SlackUserId |> tryFindUserName with
                             | Some name -> name
                             | None -> TeamMember String.Empty
-                        Some (Message (Channel channel, userName, TextMessage text))
+                        Some (Message (Channel channel, userName, TextMessage text |> TextMessage.clean slackBotId))
                     | _ -> 
                         Log.log Log.DEBUG "message skipped : %A" message
                         None
@@ -589,7 +599,7 @@ module NonEmptyList =
     let combine x y = Option.map2 append x y |> Option.orElse x |> Option.orElse y
     let value (NonEmptyList l) = l
 
-type [<Struct>] State<'a> = State of 'a
+type [<Struct>] State<'a> = State of 'a | Bye
 
 type [<Struct>] Notification<'a> = 
     { Channel: Channel
@@ -608,19 +618,22 @@ module HandlerResponse =
 
 module Actor = 
     let spawn handler state = 
-        let post channel (TeamMember teamMember) (TextMessage m) =
+        let post {Channel=channel; From= (TeamMember teamMember); Message=(TextMessage m)} =
             sprintf "@%s : %s" teamMember m |> TextMessage |> post channel
         let actor = 
             MailboxProcessor.Start <| fun channel -> 
                 let rec listen ctx = 
                     async {
-                        let! (notification:Notification<'a> option) = channel.TryReceive (10000)
+                        let! (notification:Notification<'a> option) = channel.TryReceive 10000
                         let! result = handler ctx notification
                         
                         result.Messages
-                        |> Option.iter (NonEmptyList.value >> List.iter (fun n -> post n.Channel n.From n.Message ) )
+                        |> Option.iter (NonEmptyList.value >> List.iter post)
 
-                        do! result.State |> listen
+                        do! 
+                            match result.State with
+                            | Bye -> async.Return ()
+                            | state -> listen state
                     }
                 listen state
         actor.Post

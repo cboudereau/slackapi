@@ -20,6 +20,7 @@ type [<Struct>] SlackUserId = SlackUserId of string
 
 module SlackUserId = 
     let encode (SlackUserId userId) = sprintf "<@%s>" userId
+    let decode = function Parsing.Regex "<@(.*)>" [userId] -> SlackUserId userId |> Some | _ -> None
 
 module TextMessage = 
     let clean userId (TextMessage m) = 

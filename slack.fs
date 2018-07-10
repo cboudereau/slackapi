@@ -433,9 +433,9 @@ let private rtmStart () = Http.RequestString("https://slack.com/api/rtm.start", 
 let private RtmStart = rtmStart ()
 
 let post (Channel channel) (TextMessage text) = 
-    if System.String.IsNullOrEmpty text then ()
+    if System.String.IsNullOrEmpty text then async.Return ()
     else
-        Http.Request(
+        Http.AsyncRequestString(
             "https://slack.com/api/chat.postMessage", 
             httpMethod = HttpMethod.Post,
             body = FormValues(
@@ -444,9 +444,9 @@ let post (Channel channel) (TextMessage text) =
                   ("text", text)
                   ("as_user", "true")
                   ("link_names", "1") ]))
-        |> ignore
+        |> Async.map (Log.log Log.DEBUG "chat.postMessage : %s")
 
-let tryFindChannel (Channel channel) = RtmStart.Channels |> Array.tryFind(fun c -> c.Name = channel)
+let tryFindChannel (Channel channel) = RtmStart.Channels |> Array.tryFind (fun c -> c.Name = channel)
 
 let tryFindUserName (SlackUserId userId) = RtmStart.Users |> Array.tryFind(fun u -> u.Id = userId) |> Option.map(fun u -> TeamMember u.Name)
 
@@ -619,6 +619,9 @@ type [<Struct>] HandlerResponse<'a> =
 module HandlerResponse = 
     let build m s = { Messages = m; Command=s }
 
+module Async = 
+    let sequentially l = async { for x in l do return! x }
+
 module Actor = 
     let spawn handler state = 
         let post {Channel=channel; From= (TeamMember teamMember); Message=(TextMessage m)} =
@@ -630,8 +633,10 @@ module Actor =
                         let! (notification:Notification<'a> option) = channel.TryReceive 10000
                         let! result = handler ctx notification
                         
-                        result.Messages
-                        |> Option.iter (NonEmptyList.value >> List.iter post)
+                        do! 
+                            result.Messages
+                            |> Option.map (NonEmptyList.value >> List.map post >> Async.sequentially)
+                            |> Option.defaultValue (async.Return ())
 
                         do! 
                             match result.Command with

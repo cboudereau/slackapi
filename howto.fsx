@@ -4,14 +4,18 @@
 #load "paket-files/cboudereau/fsharplib/parsing.fs"
 #load "paket-files/cboudereau/fsharplib/string.fs"
 
-open Core
-
 //Register your token before loading module : for example bind the env var to a ignored file content
 let (</>) x y = System.IO.Path.Combine(x, y)
 System.Environment.SetEnvironmentVariable("SlackToken", System.IO.File.ReadAllText(__SOURCE_DIRECTORY__ </> "token"))
 
 //Then load the Slack module
 #load "slack.fs"
+
+open Core
+
+Some Log.DEBUG |> Log.setLogLevel 
+
+Slack.post (Slack.Channel "general") (Slack.TextMessage "hello") |> Async.RunSynchronously
 
 //Disable logging
 None |> Log.setLogLevel

@@ -33,7 +33,7 @@ let slackBot token userId =
                 t |> Notification.build n.Channel n.From
                 ) 
             |> Option.map NonEmptyList.singleton
-        HandlerResponse.build notif state
+        Listen state |> HandlerResponse.build notif 
         |> Async.ret) (State ())
     faultTolerantServer token userId (fun c t m -> actor (Notification.build c t m) |> async.Return )
 

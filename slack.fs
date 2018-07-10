@@ -600,7 +600,9 @@ module NonEmptyList =
     let combine x y = Option.map2 append x y |> Option.orElse x |> Option.orElse y
     let value (NonEmptyList l) = l
 
-type [<Struct>] State<'a> = State of 'a | Bye
+type [<Struct>] State<'a> = State of 'a
+
+type [<Struct>] Command<'a> = Listen of State<'a> | Bye
 
 type [<Struct>] Notification<'a> = 
     { Channel: Channel
@@ -612,10 +614,10 @@ module Notification =
 
 type [<Struct>] HandlerResponse<'a> =
     { Messages : NonEmptyList<Notification<TextMessage>> option
-      State: State<'a> } 
+      Command: Command<'a> } 
 
 module HandlerResponse = 
-    let build m s = { Messages = m; State=s }
+    let build m s = { Messages = m; Command=s }
 
 module Actor = 
     let spawn handler state = 
@@ -632,9 +634,9 @@ module Actor =
                         |> Option.iter (NonEmptyList.value >> List.iter post)
 
                         do! 
-                            match result.State with
+                            match result.Command with
                             | Bye -> async.Return ()
-                            | state -> listen state
+                            | Listen state -> listen state
                     }
                 listen state
         actor.Post

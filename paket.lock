@@ -7,7 +7,7 @@ NUGET
     Zlib.Portable (1.11) - restriction: || (&& (< net40) (>= portable-net45+win8)) (&& (< net40) (< portable-net45+win8) (>= portable-net45+win8+wp8+wpa81))
 GITHUB
   remote: cboudereau/fsharplib
-    core.fs (357b6d39c32c903bcb240608f47b1dea3f7ecea7)
-    log.fs (357b6d39c32c903bcb240608f47b1dea3f7ecea7)
-    parsing.fs (357b6d39c32c903bcb240608f47b1dea3f7ecea7)
-    string.fs (357b6d39c32c903bcb240608f47b1dea3f7ecea7)
+    core.fs (46512252d373e965daee4e9ff4050afc0f50e43f)
+    log.fs (46512252d373e965daee4e9ff4050afc0f50e43f)
+    parsing.fs (46512252d373e965daee4e9ff4050afc0f50e43f)
+    string.fs (46512252d373e965daee4e9ff4050afc0f50e43f)

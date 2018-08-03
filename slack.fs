@@ -9,8 +9,6 @@ open System
 open System.IO
 open System.Threading
 
-open Core
-
 type [<Struct>] TeamMember = TeamMember of string
 type [<Struct>] Email = Email of string
 type [<Struct>] TextMessage = TextMessage of string
@@ -631,11 +629,18 @@ module Actor =
                 let rec listen ctx = 
                     async {
                         let! (notification:Notification<'a> option) = channel.TryReceive 10000
-                        let! result = handler ctx notification
+                        let! result = 
+                            handler ctx notification
+                            |> Async.Catch
+                            |> Async.map (function 
+                                | Choice1Of2 x -> x 
+                                | Choice2Of2 ex -> 
+                                    Log.log Log.ERROR "failed to handle notification with error %O" ex
+                                    HandlerResponse.build None (Command.Listen ctx))
                         
                         do! 
                             result.Messages
-                            |> Option.map (NonEmptyList.value >> List.map post >> Async.sequentially)
+                            |> Option.map (NonEmptyList.value >> List.map post >> Async.sequentially >> Async.Catch >> Async.map (function Choice1Of2 x -> x | Choice2Of2 ex -> Log.log Log.ERROR "failed to post slack message with error %O" ex))
                             |> Option.defaultValue (async.Return ())
 
                         do! 

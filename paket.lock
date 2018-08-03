@@ -1,13 +1,13 @@
 NUGET
   remote: https://www.nuget.org/api/v2
-    FSharp.Core (4.5) - restriction: && (< net40) (< portable-net45+win8+wp8+wpa81)
+    FSharp.Core (4.5.2) - restriction: && (< net40) (< portable-net45+win8+wp8+wpa81)
     FSharp.Data (2.4.6)
       FSharp.Core (>= 4.0.0.1) - restriction: && (< net40) (< portable-net45+win8+wp8+wpa81)
       Zlib.Portable (>= 1.11) - restriction: || (&& (< net40) (>= portable-net45+win8)) (&& (< net40) (< portable-net45+win8) (>= portable-net45+win8+wp8+wpa81))
     Zlib.Portable (1.11) - restriction: || (&& (< net40) (>= portable-net45+win8)) (&& (< net40) (< portable-net45+win8) (>= portable-net45+win8+wp8+wpa81))
 GITHUB
   remote: cboudereau/fsharplib
-    core.fs (46512252d373e965daee4e9ff4050afc0f50e43f)
-    log.fs (46512252d373e965daee4e9ff4050afc0f50e43f)
-    parsing.fs (46512252d373e965daee4e9ff4050afc0f50e43f)
-    string.fs (46512252d373e965daee4e9ff4050afc0f50e43f)
+    core.fs (fa7bfebd36c1d8e61a5fbd7ef094faa72650e38b)
+    log.fs (fa7bfebd36c1d8e61a5fbd7ef094faa72650e38b)
+    parsing.fs (fa7bfebd36c1d8e61a5fbd7ef094faa72650e38b)
+    string.fs (fa7bfebd36c1d8e61a5fbd7ef094faa72650e38b)

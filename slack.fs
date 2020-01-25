@@ -427,8 +427,7 @@ let Token =
     let token = System.Environment.GetEnvironmentVariable("SlackToken")
     if System.String.IsNullOrWhiteSpace token then failwith "SlackToken env var is not set." else token
 
-let private rtmStart () = Http.RequestString("https://slack.com/api/rtm.start", query=["token", Token], httpMethod="GET") |> RtmStart.Parse
-let private RtmStart = rtmStart ()
+let rtmStart () = Http.RequestString("https://slack.com/api/rtm.start", query=["token", Token], httpMethod="GET") |> RtmStart.Parse
 
 let post (Channel channel) (TextMessage text) = 
     if System.String.IsNullOrEmpty text then async.Return ()
@@ -444,16 +443,16 @@ let post (Channel channel) (TextMessage text) =
                   ("link_names", "1") ]))
         |> Async.map (Log.log Log.DEBUG "chat.postMessage : %s")
 
-let tryFindChannel (Channel channel) = RtmStart.Channels |> Array.tryFind (fun c -> c.Name = channel)
+let tryFindChannel (Channel channel) (rtmStart:RtmStart.Root) = rtmStart.Channels |> Array.tryFind (fun c -> c.Name = channel)
 
-let tryFindUserName (SlackUserId userId) = RtmStart.Users |> Array.tryFind(fun u -> u.Id = userId) |> Option.map(fun u -> TeamMember u.Name)
+let tryFindUserName (SlackUserId userId) (rtmStart:RtmStart.Root) = rtmStart.Users |> Array.tryFind(fun u -> u.Id = userId) |> Option.map(fun u -> TeamMember u.Name)
 
-let findBotId (Bot bot) = 
-    let user = RtmStart.Users |> Array.tryFind(fun u -> u.Name = bot)
+let findBotId (Bot bot) (rtmStart:RtmStart.Root) = 
+    let user = rtmStart.Users |> Array.tryFind(fun u -> u.Name = bot)
     user |> Option.map (fun x -> x.Id |> SlackUserId)
 
-let tryFindUserId (Email email) = 
-    RtmStart.Users
+let tryFindUserId (Email email) (rtmStart:RtmStart.Root) = 
+    rtmStart.Users
     |> Array.filter(fun u -> u.Profile.Email = Some email)
     |> Array.tryHead
     |> Option.map(fun u -> SlackUserId u.Id)
@@ -475,7 +474,7 @@ let rec private receive (ms: MemoryStream) token (webSocket: ClientWebSocket) =
 
 type [<Struct>] Message = Message of Channel * TeamMember * TextMessage
 
-let private readMessage token (webSocket: ClientWebSocket) slackBotId =
+let private readMessage rtmStart token (webSocket: ClientWebSocket) slackBotId =
     async {
         let (SlackUserId botId) = slackBotId
         Log.log Log.TRACE "readMessage for botId:%s" botId
@@ -492,7 +491,7 @@ let private readMessage token (webSocket: ClientWebSocket) slackBotId =
                         None
                     | String.Contains "message" _, _, Some (String.Contains (SlackUserId.encode slackBotId) text), Some user, Some channel when user <> botId ->
                         let userName = 
-                            match user |> SlackUserId |> tryFindUserName with
+                            match rtmStart |> tryFindUserName (SlackUserId user) with
                             | Some name -> name
                             | None -> TeamMember String.Empty
                         Some (Message (Channel channel, userName, TextMessage text |> TextMessage.clean slackBotId))
@@ -519,12 +518,12 @@ let private ping token n webSocket =
 let private webSocketServer token userId handler = 
     let handle = function Message (c, tm, m) -> handler c tm m
 
-    let rec read token (webSocket:ClientWebSocket) = 
+    let rec read rtmStart token (webSocket:ClientWebSocket) = 
         async {
             match webSocket.State with
             | WebSocketState.Open -> 
-                do! readMessage token webSocket userId |> Async.bind (Option.map handle >> Async.ofOption ())
-                do! read token webSocket
+                do! readMessage rtmStart token webSocket userId |> Async.bind (Option.map handle >> Async.ofOption ())
+                do! read rtmStart token webSocket
             | _ -> return ()
         }
     
@@ -547,7 +546,7 @@ let private webSocketServer token userId handler =
         Log.log Log.INFO "rtmStart : %s" rtmStart.Url
         do! webSocket.ConnectAsync(Uri(rtmStart.Url), token) |> Async.AwaitTask
         do!
-            [ read token webSocket
+            [ read rtmStart token webSocket
               pinG token 1 webSocket ]
             |> Async.Parallel
             |> Async.Ignore

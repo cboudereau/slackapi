@@ -44,7 +44,8 @@ let slackBot token userId =
 let cancel = new CancellationTokenSource()
 
 //Find your bot and enjoy !
-findBotId (Bot "belzebot") |> Option.iter (slackBot cancel.Token >> Async.Start)
+let config = Slack.rtmStart ()
+findBotId (Bot "belzebot") config |> Option.iter (slackBot cancel.Token >> Async.Start)
 
 //Stop the bot
 cancel.Cancel()

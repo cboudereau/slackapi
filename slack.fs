@@ -628,8 +628,11 @@ module Actor =
                 let rec listen ctx = 
                     async {
                         let! (notification:Notification<'a> option) = channel.TryReceive 10000
+                        
+                        let reply = channel.Post
+                        
                         let! result = 
-                            handler ctx notification
+                            handler ctx reply notification
                             |> Async.Catch
                             |> Async.map (function 
                                 | Choice1Of2 x -> x 

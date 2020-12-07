@@ -27,10 +27,10 @@ open System.Threading
 
 open Slack
 
-let slackBot token userId = 
-    let actor = Actor.spawn (fun state x -> 
+let slackBot config token userId = 
+    let actor = Actor.spawn (fun state reply message -> 
         let notif = 
-            x 
+            message
             |> Option.map(fun n -> 
                 let t = sprintf "slackBot received %A. Do whatever in another thread (actor) without disturbing the bot listener!" n.Message |> TextMessage
                 printfn "%A" t
@@ -39,13 +39,13 @@ let slackBot token userId =
             |> Option.map NonEmptyList.singleton
         Listen state |> HandlerResponse.build notif 
         |> Async.ret) (State ())
-    faultTolerantServer token userId (fun c t m -> actor (Notification.build c t m) |> async.Return )
+    listen config token userId (fun c t m -> actor (Notification.build c t m) |> async.Return )
 
 let cancel = new CancellationTokenSource()
 
 //Find your bot and enjoy !
 let config = Slack.rtmStart ()
-findBotId (Bot "belzebot") config |> Option.iter (slackBot cancel.Token >> Async.Start)
+findBotId (Bot "belzebot") config |> Option.iter (slackBot config cancel.Token >> Async.Start)
 
 //Stop the bot
 cancel.Cancel()

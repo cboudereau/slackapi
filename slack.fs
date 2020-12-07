@@ -515,35 +515,32 @@ let private ping token n webSocket =
         Log.log Log.TRACE "ping sent"
     }
 
-let private webSocketServer token userId handler = 
+let private webSocketServer (rtmStart:RtmStart.Root) token userId handler = 
     let handle = function Message (c, tm, m) -> handler c tm m
 
-    let rec read rtmStart token (webSocket:ClientWebSocket) = 
+    let rec read config token (webSocket:ClientWebSocket) = 
         async {
             match webSocket.State with
             | WebSocketState.Open -> 
-                do! readMessage rtmStart token webSocket userId |> Async.bind (Option.map handle >> Async.ofOption ())
-                do! read rtmStart token webSocket
+                do! readMessage config token webSocket userId |> Async.bind (Option.map handle >> Async.ofOption ())
+                do! read config token webSocket
             | _ -> return ()
         }
     
     async { 
         use webSocket = new ClientWebSocket()
         Log.log Log.TRACE "socket connecting"
-        let rtmStart = rtmStart ()
 
-        let rec pinG token n (webSocket:ClientWebSocket) =
+        let rec pinG (token:CancellationToken) n (webSocket:ClientWebSocket) =
             async {
-                match webSocket.State with
-                | WebSocketState.Open ->
+                if webSocket.State = WebSocketState.Open && not token.IsCancellationRequested then
                     let next = if n = Int32.MaxValue then 1 else n + 1
                     do! ping token next webSocket
                     do! Async.Sleep 1000
                     do! pinG token next webSocket 
-                | _ -> return ()
             }
 
-        Log.log Log.INFO "rtmStart : %s" rtmStart.Url
+        Log.log Log.INFO "rtmStartUrl : %s" rtmStart.Url
         do! webSocket.ConnectAsync(Uri(rtmStart.Url), token) |> Async.AwaitTask
         do!
             [ read rtmStart token webSocket
@@ -554,33 +551,12 @@ let private webSocketServer token userId handler =
         return webSocket.State
     }
 
-let rec faultTolerantServer (cancelToken:CancellationToken) userId handler = 
-    let next = 
-        let rnd = Random ()
-        fun () -> rnd.Next(0, 10)
-    
-    let reconnect () =
-        if not cancelToken.IsCancellationRequested then 
-            let time = next ()
-            Log.log Log.WARN "retrying in %is" time
-            time * 1000 |> Async.Sleep |> Async.bind (fun _ -> faultTolerantServer cancelToken userId handler)
-        else 
-            Log.log Log.TRACE "socketServer finished"
-            Async.ret ()
-
-    async {
-        do! 
-            webSocketServer cancelToken userId handler
-            |> Async.Catch
-            |> Async.bind (function 
-                | Choice1Of2 WebSocketState.Open -> Log.log Log.INFO "server finished" |> Async.ret
-                | Choice1Of2 state -> 
-                    state.ToString() |> Log.log Log.WARN "server finished not gracefully with state %s"
-                    reconnect ()
-                | Choice2Of2 ex ->
-                    Log.log Log.ERROR "reconnecting due to %O" ex
-                    reconnect ())
-    }
+let listen config (cancelToken:CancellationToken) userId handler = 
+    webSocketServer config cancelToken userId handler 
+    |> Async.map (
+        function 
+        | WebSocketState.Open -> Log.log Log.INFO "server finished"
+        | state -> state.ToString() |> Log.log Log.WARN "server finished not gracefully with state %s")
 
 module StructTuple = 
     let sfst (struct(x,_)) = x
